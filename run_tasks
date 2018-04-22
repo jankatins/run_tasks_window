@@ -39,6 +39,7 @@ import wx.richtext as rt
 
 ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
 
+
 class RunTaskModel():
 
     def __init__(self):
@@ -61,7 +62,7 @@ class RunTaskModel():
             print(f"Creating example config in {self.ini_file}...")
             new_config = configparser.ConfigParser()
             new_config.optionxform = str
-            new_config['Default'] = {'name': 'Run Stuff', 'icon':'~/path/to/icon.png'}
+            new_config['Default'] = {'name': 'Run Stuff', 'icon': '~/path/to/icon.png'}
             exampl = {'Run ls': 'ls -la',
                       'Sleep': 'while true ; do sleep 1 && echo "I slept..."; done'}
             new_config['Runners'] = exampl
@@ -74,10 +75,16 @@ class RunTaskModel():
         return self.config['Default'].get('name', fallback='Run Stuff')
 
     @property
+    def script_path(self):
+        return os.path.abspath(sys.argv[0])
+
+    @property
     def icon_path(self):
-        iconpath = self.config['Default'].get('iconpath')
-        if iconpath and os.path.exists(iconpath):
-            return os.path.expanduser(iconpath)
+        iconpath = self.config['Default'].get('icon')
+        if iconpath:
+            iconpath = os.path.abspath(os.path.expanduser(iconpath))
+            if os.path.exists(iconpath):
+                return iconpath
         return None
 
     @property
@@ -90,11 +97,11 @@ class RunTaskModel():
             return {}
         return dict(runners)
 
-    def notify_changes(self, line:str):
+    def notify_changes(self, line: str):
         for listener in self.output_listener:
             listener(line, 'bold')
 
-    def notify_output(self, line:str):
+    def notify_output(self, line: str):
         for listener in self.output_listener:
             listener(line)
 
@@ -134,6 +141,7 @@ class RunTaskModel():
                 proc.terminate()
                 proc.kill()
 
+
 class Frame(wx.Frame):
     def __init__(self, app, model):
         """Window which displays buttons and output"""
@@ -172,6 +180,9 @@ class Frame(wx.Frame):
                 self.Bind(wx.EVT_UPDATE_UI, updateUI, item)
 
         fileMenu = wx.Menu()
+        doBind(fileMenu.Append(-1, "Add Autostart Entry", "Add Autostart Entry in ~/.config/autostart/"),
+               self.on_file_add_autostart_entry)
+
         doBind(fileMenu.Append(-1, "E&xit\tCtrl+Q", "Quit this program"),
                self.on_file_exit)
 
@@ -202,6 +213,7 @@ class Frame(wx.Frame):
         if current_label.startswith("Run"):
             def enable_again():
                 wx.CallAfter(button.SetLabel, current_label)
+
             self.model.start_task(name, enable_again)
             button.SetLabel(f"Kill '{name}''")
         if current_label.startswith("Kill"):
@@ -218,9 +230,12 @@ class Frame(wx.Frame):
     def on_file_exit(self, event):
         self.shutdown()
 
+    def on_file_add_autostart_entry(self, event):
+        self.add_autostart_entry()
 
     def _append_line(self, line, style):
         """function to be invoked in the UI Thread with wx.CallAfter(append_line_in_ui_thread, args)"""
+
         # only after 700 lines reset to 500 to not do it every time
         def last_line():
             return self.text.PositionToXY(self.text.LastPosition)[2]
@@ -261,6 +276,22 @@ class Frame(wx.Frame):
         # The listener is outside of the UI thread, so has to use wx.CallAfter(...)!
         wx.CallAfter(self._append_line, line, style)
 
+    def add_autostart_entry(self):
+        autostart_content = f"""[Desktop Entry]
+Encoding=UTF-8
+Name={self.model.name}
+Icon={self.model.icon_path or ''}
+Exec={self.model.script_path}
+Terminal=false
+Type=Application
+Categories=
+"""
+        autostart_file = os.path.expanduser(f'~/.config/autostart/{self.model.name}.desktop')
+        bcontent = autostart_content.encode('utf8')
+        with open(autostart_file, "wb") as fileobj:
+            fileobj.write(bcontent)
+        self.output_listener(f"Wrote autostart entry: {autostart_file}\n", "bold")
+
     # kind of the controller of the thing
     def shutdown(self):
         """Destroy all running tasks, the taskbar icon and the frame
@@ -283,7 +314,6 @@ class Frame(wx.Frame):
     def hide_window(self):
         """Hides the window"""
         self.Hide()
-
 
 
 class TaskBarIcon(wx.adv.TaskBarIcon):
@@ -317,8 +347,6 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         add_menu_item(menu, 'Exit', self.on_exit)
         return menu
 
-
-
     # wiring the UI to the controler/model
     def on_task(self, event, name):
         self.model.kill_tasks(name)
@@ -336,11 +364,12 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         # The frame kills us...
         wx.CallAfter(self.frame.shutdown)
 
+
 class App(wx.App):
 
     def OnInit(self):
         model = RunTaskModel()
-        frame=Frame(self, model)
+        frame = Frame(self, model)
         self.SetTopWindow(frame)
         return True
 
@@ -364,7 +393,7 @@ def replace_icon():
     from zlib import compress
     from base64 import b64encode
     with open(sys.argv[2], "rb") as fileobj:
-       data = b64encode(compress(fileobj.read()))
+        data = b64encode(compress(fileobj.read()))
     with open(__file__, "rb") as fileobj:
         script_content = fileobj.read()
     new_content = []
@@ -377,7 +406,6 @@ def replace_icon():
         if line == b'# ###---START-ICON---####':
             next_is_icon = True
         new_content.append(line + b'\n')
-
 
     with open(__file__, "wb") as fileobj:
         fileobj.writelines(new_content)
@@ -400,7 +428,7 @@ ICON_BASE64 = b'eJzsu/k/VO//P37GYMraQpYsYVTIFsJYCzGUMvZdISFM9t1oQYQMEkJZkl12skyp
 # ###---END-ICON---####
 
 if __name__ == '__main__':
-    if len(sys.argv)> 1:
+    if len(sys.argv) > 1:
         if sys.argv[1] == 'replace_icon':
             replace_icon()
             sys.exit(0)
