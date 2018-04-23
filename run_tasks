@@ -180,7 +180,10 @@ class Frame(wx.Frame):
                 self.Bind(wx.EVT_UPDATE_UI, updateUI, item)
 
         fileMenu = wx.Menu()
-        doBind(fileMenu.Append(-1, "Add Autostart Entry", "Add Autostart Entry in ~/.config/autostart/"),
+        doBind(fileMenu.Append(-1, "Add desktop Entry", "Add desktop Entry in ~/.config/autostart/"),
+               self.on_file_add_desktop_entry)
+
+        doBind(fileMenu.Append(-1, "Add Autostart Entry", "Add Autostart Entry in ~/.local/share/applications"),
                self.on_file_add_autostart_entry)
 
         doBind(fileMenu.Append(-1, "&Preferences\tCtrl+P", "Open Config file in Editor"),
@@ -235,6 +238,9 @@ class Frame(wx.Frame):
 
     def on_file_add_autostart_entry(self, event):
         self.add_autostart_entry()
+
+    def on_file_add_desktop_entry(self, event):
+        self.add_desktop_entry()
 
     def on_file_preferences(self, event):
         self.open_config_in_editor()
@@ -297,6 +303,22 @@ Categories=
         with open(autostart_file, "wb") as fileobj:
             fileobj.write(bcontent)
         self.output_listener(f"Wrote autostart entry: {autostart_file}\n", "bold")
+
+    def add_desktop_entry(self):
+        content = f"""[Desktop Entry]
+Encoding=UTF-8
+Name={self.model.name}
+Icon={self.model.icon_path or ''}
+Exec={self.model.script_path}
+Terminal=false
+Type=Application
+Categories=
+"""
+        file_name = os.path.expanduser(f'~/.local/share/applications/{self.model.name}.desktop')
+        bcontent = content.encode('utf8')
+        with open(file_name, "wb") as fileobj:
+            fileobj.write(bcontent)
+        self.output_listener(f"Wrote Desktop entry: {file_name}\n", "bold")
 
     def open_config_in_editor(self):
         subprocess.call(('xdg-open', self.model.ini_file))
