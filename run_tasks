@@ -72,7 +72,7 @@ class RunTaskModel():
 
     @property
     def name(self):
-        return self.config['Default'].get('name', fallback='Run Stuff')
+        return self.config['Default'].get('name', fallback='Run Tasks')
 
     @property
     def script_path(self):
