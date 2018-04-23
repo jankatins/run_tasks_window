@@ -183,6 +183,9 @@ class Frame(wx.Frame):
         doBind(fileMenu.Append(-1, "Add Autostart Entry", "Add Autostart Entry in ~/.config/autostart/"),
                self.on_file_add_autostart_entry)
 
+        doBind(fileMenu.Append(-1, "&Preferences\tCtrl+P", "Open Config file in Editor"),
+               self.on_file_preferences)
+
         doBind(fileMenu.Append(-1, "E&xit\tCtrl+Q", "Quit this program"),
                self.on_file_exit)
 
@@ -232,6 +235,9 @@ class Frame(wx.Frame):
 
     def on_file_add_autostart_entry(self, event):
         self.add_autostart_entry()
+
+    def on_file_preferences(self, event):
+        self.open_config_in_editor()
 
     def _append_line(self, line, style):
         """function to be invoked in the UI Thread with wx.CallAfter(append_line_in_ui_thread, args)"""
@@ -291,6 +297,9 @@ Categories=
         with open(autostart_file, "wb") as fileobj:
             fileobj.write(bcontent)
         self.output_listener(f"Wrote autostart entry: {autostart_file}\n", "bold")
+
+    def open_config_in_editor(self):
+        subprocess.call(('xdg-open', self.model.ini_file))
 
     # kind of the controller of the thing
     def shutdown(self):
