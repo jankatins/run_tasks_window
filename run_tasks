@@ -32,6 +32,7 @@ import threading
 from base64 import b64decode
 from io import BytesIO
 from zlib import decompress
+import psutil
 
 import wx
 import wx.adv
@@ -127,19 +128,29 @@ class RunTaskModel():
         self.running.remove((name, proc))
         after_callback()
 
+    def _kill_process(self, proc_pid):
+        """Kill the whole process tree of the process"""
+        try:
+            process = psutil.Process(proc_pid)
+            for child in process.children(recursive=True):
+                child.terminate()
+                child.kill()
+            process.terminate()
+            process.kill()
+        except Exception as e:
+            self.notify_changes(f"An error accoured while killing process {proc_pid}: {str(e)}")
+
     def kill_all_running_tasks(self):
         for name, proc in self.running:
             self.notify_changes(f"Killing task '{name}' with pid {proc.pid}\n")
-            proc.terminate()
-            proc.kill()
+            self._kill_process(proc.pid)
 
     def kill_tasks(self, to_be_killed):
         # No callback and no removal because when we kill it, _run_task will run the callback there
         for name, proc in self.running:
             if name == to_be_killed:
                 self.notify_changes(f"Killing task '{name}' with pid {proc.pid}\n")
-                proc.terminate()
-                proc.kill()
+                self._kill_process(proc.pid)
 
 
 class Frame(wx.Frame):

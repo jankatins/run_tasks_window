@@ -22,9 +22,9 @@ Tested under Linux. Windows & Mac should be possible but are up to now untested.
 
 ## Install
 
-There are two dependency: `python3` and the wx toolkit.
+There are three dependency: `python3`, `psutil` and the python wx toolkit.
 
-* On Debian: `sudo apt install python3-wxgtk4.0`
+* On Debian: `sudo apt install python3-wxgtk4.0 python3-psutil`
 
 Script is installed by putting a copy of the script into `$PATH`:
 
