@@ -26,17 +26,19 @@ import functools
 import os
 import os.path
 import re
+import shlex
 import subprocess
 import sys
 import threading
 from base64 import b64decode
 from io import BytesIO
 from zlib import decompress
-import psutil
 
+import psutil
 import wx
 import wx.adv
 import wx.richtext as rt
+import yaml
 
 ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
 
@@ -46,7 +48,7 @@ class RunTaskModel():
     def __init__(self):
         """Model which holds the config and executes commands asynchronously"""
         self.scriptname = os.path.basename(sys.argv[0])
-        self.ini_file = os.path.expanduser(f'~/.config/{self.scriptname}.ini')
+        self.config_file = os.path.expanduser(f'~/.config/{self.scriptname}.yml')
         self.config = None
         self.init_config()
 
@@ -56,24 +58,66 @@ class RunTaskModel():
         self.running = []
 
     def init_config(self):
-        self.config = configparser.ConfigParser()
-        # make keys case sensitive
-        self.config.optionxform = str
-        if not os.path.exists(self.ini_file):
-            print(f"Creating example config in {self.ini_file}...")
-            new_config = configparser.ConfigParser()
-            new_config.optionxform = str
-            new_config['Default'] = {'name': 'Run Stuff', 'icon': '~/path/to/icon.png'}
-            exampl = {'Run ls': 'ls -la',
-                      'Sleep': 'while true ; do sleep 1 && echo "I slept..."; done'}
-            new_config['Runners'] = exampl
-            with open(self.ini_file, 'w') as configfile:
-                new_config.write(configfile)
-        self.config.read(self.ini_file)
+        self.try_convert_ini_to_yml()
+        if not os.path.exists(self.config_file):
+            print(f"Creating example config in {self.config_file}...")
+            example = {}
+            example['name'] = "Run Tasks"
+            example['icon'] = "~/path/to/icon.png"
+            runners = []
+            runners.append({'name': 'Run ls',
+                            'cmd': 'ls -la',
+                            'autostart': False})
+            runners.append({'name': 'Sleep',
+                            'cmd': 'while true ; do sleep 1 && echo "I slept..."; done',
+                            'autostart': True,
+                            'shell': '/bin/bash'})
+            example['runners'] = runners
+            with open(self.config_file, 'w') as outfile:
+                yaml.dump(example, outfile, default_flow_style=False)
+        with open(self.config_file, 'r') as f:
+            try:
+                config = yaml.load(f)
+            except yaml.YAMLError as e:
+                print(e)
+                sys.exit(-1)
+        # validation
+        for item, default in [('name', 'Run Tasks'), ('icon', '~/path/to/icon.png'), ('runners', [])]:
+            if config.get(item) is None:
+                print(f"Config was invalid: '{item}' was unset, set to default'")
+                config[item] = default
+        # copy so we can delete stuff in config
+        runners = list(config['runners'])
+        for definition in runners:
+            if not 'cmd' in definition:
+                print(f"Config invalid: runner {definition['name']} does not contain a command. Deleting'")
+                config['runners'].remove(definition)
+        self.config = config
+
+    def try_convert_ini_to_yml(self):
+        ini_file = os.path.expanduser(f'~/.config/{self.scriptname}.ini')
+        if os.path.exists(ini_file) and not os.path.exists(self.config_file):
+            config = configparser.ConfigParser()
+            # make keys case sensitive
+            config.optionxform = str
+            config.read(ini_file)
+            converted = {}
+            converted['name'] = config.get('Default', 'name', fallback="Run Tasks")
+            converted['icon'] = config.get('Default', 'icon', fallback="~/path/to/icon.png")
+            runners = []
+            for name, command in dict(config["Runners"]).items():
+                runners.append({'name': name,
+                                'cmd': command,
+                                'autostart': False,
+                                'shell': '/bin/bash'})
+            converted['runners'] = runners
+            with open(self.config_file, 'w') as outfile:
+                yaml.dump(converted, outfile, default_flow_style=False)
+            print(f"Converted config to yaml: {self.config_file}")
 
     @property
     def name(self):
-        return self.config['Default'].get('name', fallback='Run Tasks')
+        return self.config.get('name', 'Run Tasks')
 
     @property
     def script_path(self):
@@ -81,7 +125,7 @@ class RunTaskModel():
 
     @property
     def icon_path(self):
-        iconpath = self.config['Default'].get('icon')
+        iconpath = self.config.get('icon')
         if iconpath:
             iconpath = os.path.abspath(os.path.expanduser(iconpath))
             if os.path.exists(iconpath):
@@ -89,14 +133,20 @@ class RunTaskModel():
         return None
 
     @property
-    def runners(self):
+    def all_runners(self):
         try:
-            runners = self.config['Runners']
+            runners = self.config['runners']
         except:
-            msg_no_config = f"No runners found, you need to edit the config '{self.ini_file}\n'"
+            msg_no_config = f"No runners found, you need to edit the config '{self.config_file}\n'"
             self.notify_changes(msg_no_config)
             return {}
-        return dict(runners)
+        return [runner['name'] for runner in runners]
+
+    def get_runner(self, name):
+        for runner in self.config['runners']:
+            if runner['name'] == name:
+                return runner
+        raise ValueError(f'Run configuration for "{name}" does not exist in config')
 
     def notify_changes(self, line: str):
         for listener in self.output_listener:
@@ -115,8 +165,15 @@ class RunTaskModel():
         thread.start()
 
     def _run_task(self, name, after_callback):
-        cmd = self.runners[name]
-        proc = subprocess.Popen([cmd], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True)
+        runner = self.get_runner(name)
+        cmd = runner['cmd']
+        shell = runner.get('shell')
+        if shell:
+            proc = subprocess.Popen([cmd], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                    shell=True, executable=shell)
+        else:
+            proc = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
         self.running.append((name, proc))
         self.notify_changes(f"Started task '{name}' (pid: {proc.pid}, cmd: «{' '.join(proc.args)}»)\n")
         for line in proc.stdout:
@@ -213,8 +270,7 @@ class Frame(wx.Frame):
         sizer = wx.BoxSizer(wx.VERTICAL)
         button_space = wx.BoxSizer(wx.HORIZONTAL)
         sizer.Add(button_space, 0, wx.ALL, 5)
-        for k in self.model.runners.keys():
-            name = k
+        for name in self.model.all_runners:
             button = wx.Button(panel, -1, f"Run '{name}'")
             func = functools.partial(self.on_button, button=button, name=name)
             button.Bind(wx.EVT_BUTTON, func)
@@ -332,7 +388,7 @@ Categories=
         self.output_listener(f"Wrote Desktop entry: {file_name}\n", "bold")
 
     def open_config_in_editor(self):
-        subprocess.call(('xdg-open', self.model.ini_file))
+        subprocess.call(('xdg-open', self.model.config_file))
 
     # kind of the controller of the thing
     def shutdown(self):
