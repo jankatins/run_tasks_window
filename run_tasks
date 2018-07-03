@@ -186,14 +186,33 @@ class RunTaskModel():
         after_callback()
 
     def _kill_process(self, proc_pid):
-        """Kill the whole process tree of the process"""
-        try:
-            process = psutil.Process(proc_pid)
-            for child in process.children(recursive=True):
+        """Kill the whole process tree of the process, including the process itself"""
+        children = []
+        process = psutil.Process(proc_pid)
+        # make really sure we do not forget any process...
+        for child in process.children(recursive=True):
+            children.append(child)
+        for child in children:
+            try:
                 child.terminate()
+            except Exception as e:
+                self.notify_changes(f"An error accoured while terminating child {child.pid}: {str(e)}")
+        gone, alive = psutil.wait_procs(children, timeout=3)
+        for child in alive:
+            try:
                 child.kill()
+            except Exception as e:
+                self.notify_changes(f"An error accoured while killing child {child.pid}: {str(e)}")
+        try:
             process.terminate()
-            process.kill()
+            try:
+                # We don't care about the return code, as the outer functions care for that
+                process.wait(timeout=3)
+            except psutil.TimeoutExpired:
+                process.kill()
+        except psutil.NoSuchProcess:
+            # don't care anymore
+            pass
         except Exception as e:
             self.notify_changes(f"An error accoured while killing process {proc_pid}: {str(e)}")
 
@@ -291,6 +310,7 @@ class Frame(wx.Frame):
             button.SetLabel(f"Kill '{name}''")
         if current_label.startswith("Kill"):
             self.model.kill_tasks(name)
+            button.SetLabel(f"Run '{name}''")
 
     def on_close(self, evt):
         """On close mimimize to tray"""
